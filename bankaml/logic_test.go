@@ -142,7 +142,7 @@ func TestWorkflowFourEyes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err = ApplyTransition(TransitionInput{To: CaseValidated, Actor: "analyst", Reason: "ok", Case: next})
+	_, err = ApplyTransition(TransitionInput{To: CaseValidated, Actor: "analyst", Reason: "ok", Case: next})
 	if err == nil {
 		t.Fatal("investigator validated their own case")
 	}
