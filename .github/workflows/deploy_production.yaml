@@ -27,12 +27,11 @@ jobs:
     uses: ./.github/workflows/backend_deploy_workflow.yaml
     permissions:
       contents: read
-      id-token: "write" # needed for using open id token to authenticate with GCP services
     with:
-      environment: "production"
       version: ${{ github.ref_name }}
     secrets:
-      segment_write_key_opensource: ${{ secrets.SEGMENT_WRITE_KEY_OPENSOURCE }}
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
   publish_readme:
     needs: test_backend
