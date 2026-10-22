@@ -78,6 +78,57 @@ func TestScenariosPositiveNegativeAndBoundary(t *testing.T) {
 	}}); len(alerts) != 1 {
 		t.Fatal("UC08 positive")
 	}
+	if alerts := EvaluateScenarios(only("UC02"), Population{Now: now, Transactions: []Transaction{
+		{ClientID: "c", Amount: 1000, At: now.Add(-20 * 24 * time.Hour)},
+		{ClientID: "c", Amount: 1000, At: now.Add(-19 * 24 * time.Hour)},
+		{ClientID: "c", Amount: 8000, At: now.Add(-24 * time.Hour)},
+		{ClientID: "c", Amount: 8000, At: now.Add(-20 * time.Hour)},
+		{ClientID: "c", Amount: 8000, At: now.Add(-10 * time.Hour)},
+		{ClientID: "c", Amount: 8000, At: now.Add(-5 * time.Hour)},
+		{ClientID: "c", Amount: 8000, At: now},
+	}}); len(alerts) != 1 {
+		t.Fatalf("UC02 positive: %d", len(alerts))
+	}
+	if alerts := EvaluateScenarios(only("UC04"), Population{Now: now, Related: map[string][]string{}, Transactions: []Transaction{
+		{ClientID: "c", AccountID: "a", CounterpartyAccount: "b", Direction: "out", Amount: 1000, At: now},
+		{ClientID: "c", AccountID: "b", CounterpartyAccount: "a", Direction: "out", Amount: 1000, At: now.Add(time.Hour)},
+	}}); len(alerts) == 0 {
+		t.Fatal("UC04 positive")
+	}
+	if alerts := EvaluateScenarios(only("UC05"), Population{Now: now, Transactions: []Transaction{
+		{ClientID: "c", Channel: "cash", Amount: 3000, At: now},
+		{ClientID: "c", Channel: "cash", Amount: 3000, At: now},
+		{ClientID: "c", Channel: "cash", Amount: 3000, At: now},
+	}}); len(alerts) != 1 {
+		t.Fatalf("UC05 positive: %d", len(alerts))
+	}
+	if alerts := EvaluateScenarios(only("UC06"), Population{Now: now, Transactions: []Transaction{
+		{ClientID: "c", Counterparty: "one", Amount: 900, At: now},
+		{ClientID: "c", Counterparty: "two", Amount: 10, At: now},
+	}}); len(alerts) != 1 {
+		t.Fatalf("UC06 positive: %d", len(alerts))
+	}
+	if alerts := EvaluateScenarios(only("UC09"), Population{Now: now, Clients: []ClientInput{{ClientRef: "c", Profile: ClientProfile{ExpectedMonthlyVolume: 1000}}}, Transactions: []Transaction{
+		{ClientID: "c", Amount: 5000, At: now},
+	}}); len(alerts) != 1 {
+		t.Fatalf("UC09 positive: %d", len(alerts))
+	}
+	if alerts := EvaluateScenarios(only("UC10"), Population{Now: now, Transactions: []Transaction{
+		{ClientID: "a", Counterparty: "shared", Amount: 10, At: now},
+		{ClientID: "b", Counterparty: "shared", Amount: 10, At: now},
+		{ClientID: "d", Counterparty: "shared", Amount: 10, At: now},
+	}}); len(alerts) != 3 {
+		t.Fatalf("UC10 positive: %d", len(alerts))
+	}
+	uc11 := only("UC11")
+	screening := ScreeningAlerts(uc11[0], DiffSummary{New: []Match{{ClientRef: "c", EntityID: "os", Change: "new"}}})
+	if len(screening) != 1 || screening[0].Explanation == "" {
+		t.Fatal("UC11 did not open a review")
+	}
+	score := CalculateScore(ScoreInput{Client: ClientInput{ClientRef: "c", OpenAlerts: 1}, Reason: "UC12", Formula: DefaultFormula(), Matches: []Match{{Qualification: QualToReview}}})
+	if score.Reason != "UC12" || !score.ReviewRequired {
+		t.Fatal("UC12 score lost the sanctions review")
+	}
 	disabled := only("UC07")
 	disabled[0].Enabled = false
 	if alerts := EvaluateScenarios(disabled, Population{Transactions: []Transaction{{ClientID: "c", Country: "IR"}}}); len(alerts) != 0 {
