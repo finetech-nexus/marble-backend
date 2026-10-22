@@ -57,7 +57,7 @@ func (p *PG) InsertSearch(ctx context.Context, search Search, matches []Match) e
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `insert into bankaml_searches
 		(id, org_id, client_ref, query, query_hash, source, status, error, transmitted, created_by, created_at)
 		values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
