@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/checkmarble/marble-backend/bankaml"
 	"github.com/checkmarble/marble-backend/infra"
 	"github.com/checkmarble/marble-backend/models"
 	"github.com/checkmarble/marble-backend/pubapi"
@@ -107,6 +108,8 @@ func addRoutes(r *gin.Engine, conf Configuration, uc usecases.Usecases, auth uti
 
 	router := r.Group("/", auth.AuthedBy(utils.FederatedBearerToken, utils.PublicApiKey),
 		allowedNetworksGuard.Guard(usecases.AllowedNetworksOther))
+
+	bankaml.Mount(router, logger)
 
 	router.GET("/credentials", tom, handleGetCredentials())
 	router.PATCH("/config/usage-tracking", tom, handleUpdateUsageTracking(uc))
