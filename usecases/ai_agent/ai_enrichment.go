@@ -3,6 +3,8 @@ package ai_agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/checkmarble/llmberjack"
 	"github.com/checkmarble/llmberjack/llms/openai"
@@ -83,6 +85,37 @@ func (uc *AiAgentUsecase) EnrichCasePivotObjects(ctx context.Context, orgId uuid
 			PivotData:       pivotObject.PivotObjectData.Data,
 		})
 	}
+	if len(pivotDataForEnrichment) == 0 {
+		decisions, _, err := uc.repository.DecisionsByCaseIdFromCursor(ctx, uc.executorFactory.NewExecutor(), models.CaseDecisionsRequest{
+			OrgId:  orgId,
+			CaseId: caseId,
+			Limit:  20,
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "could not list case decisions for KYC enrichment")
+		}
+		for _, decision := range decisions {
+			data := map[string]any{}
+			for key, value := range decision.ClientObject.Data {
+				data[key] = value
+			}
+			data["risk_score"] = decision.Score
+			data["risk_level"] = decision.Outcome.String()
+			tags := make([]string, 0, len(decision.ScreeningExecutions))
+			for _, screening := range decision.ScreeningExecutions {
+				if screening.Name != "" {
+					tags = append(tags, screening.Name)
+				}
+			}
+			if len(tags) > 0 {
+				data["screening_tags"] = strings.Join(tags, ", ")
+			}
+			pivotDataForEnrichment = append(pivotDataForEnrichment, PivotDataForEnrichment{
+				PivotObjectName: decision.ClientObject.TableName,
+				PivotData:       data,
+			})
+		}
+	}
 
 	var results []models.AiEnrichmentKYC
 
@@ -119,10 +152,12 @@ func (uc *AiAgentUsecase) enrichData(
 ) (models.AiEnrichmentKYC, error) {
 	logger := utils.LoggerFromContext(ctx)
 
-	// Get or initialize the enrichment adapter
+	// Get or initialize the enrichment adapter. Without a search provider, return the
+	// prospect data already stored on the case so the reviewer still sees the KYC profile.
 	adapter, err := uc.getEnrichmentAdapter()
 	if err != nil {
-		return models.AiEnrichmentKYC{}, errors.Wrap(err, "failed to get enrichment adapter")
+		logger.InfoContext(ctx, "KYC enrichment uses stored prospect data", "error", err.Error())
+		return localKYCEnrichment(data), nil
 	}
 
 	// For now, use the Language from the case review setting ... See if we need to refacto to move into a general setting
@@ -179,7 +214,8 @@ func (uc *AiAgentUsecase) enrichData(
 
 	response, err := DoLLMRequest(ctx, adapter, request)
 	if err != nil {
-		return models.AiEnrichmentKYC{}, errors.Wrap(err, "failed to make request")
+		logger.InfoContext(ctx, "KYC enrichment request failed, using stored prospect data", "error", err.Error())
+		return localKYCEnrichment(data), nil
 	}
 	logger.DebugContext(ctx, "KYC Enrichment - Response", "response", response)
 
@@ -205,4 +241,82 @@ func (uc *AiAgentUsecase) enrichData(
 			}
 		}),
 	}, nil
+}
+
+func localKYCEnrichment(data []byte) models.AiEnrichmentKYC {
+	var payload PivotDataForEnrichment
+	_ = json.Unmarshal(data, &payload)
+	fields := payload.PivotData
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	name := enrichmentText(fields, "full_name", "name", "legal_name")
+	if name == "" {
+		name = strings.TrimSpace(enrichmentText(fields, "first_name") + " " + enrichmentText(fields, "last_name"))
+	}
+	if name == "" {
+		name = payload.PivotObjectName
+	}
+	yesNo := func(key string) string {
+		value, ok := fields[key]
+		if !ok {
+			return "—"
+		}
+		if value == true || value == "true" {
+			return "oui"
+		}
+		return "non"
+	}
+	analysis := fmt.Sprintf(`### Données déclarées
+- Fonction publique : %s
+- Proche d'une PPE : %s
+- Implication financière avec une PPE : %s
+
+### Données système
+- Tags de screening : %s
+- Score : %s
+- Niveau : %s
+- KYC : %s
+- Expiration KYC : %s`,
+		yesNo("pep_public_function"),
+		yesNo("pep_family_associate"),
+		yesNo("pep_financial_involvement"),
+		orDash(enrichmentText(fields, "screening_tags")),
+		orDash(enrichmentText(fields, "risk_score")),
+		orDash(enrichmentText(fields, "risk_level")),
+		orDash(enrichmentText(fields, "kyc_status")),
+		orDash(enrichmentText(fields, "kyc_expires_at")),
+	)
+	return models.AiEnrichmentKYC{
+		Analysis:   analysis,
+		EntityName: name,
+	}
+}
+
+func enrichmentText(fields map[string]any, keys ...string) string {
+	for _, key := range keys {
+		switch value := fields[key].(type) {
+		case string:
+			if strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		case float64:
+			return fmt.Sprintf("%g", value)
+		case int:
+			return fmt.Sprintf("%d", value)
+		case bool:
+			if value {
+				return "oui"
+			}
+			return "non"
+		}
+	}
+	return ""
+}
+
+func orDash(value string) string {
+	if value == "" {
+		return "—"
+	}
+	return value
 }
